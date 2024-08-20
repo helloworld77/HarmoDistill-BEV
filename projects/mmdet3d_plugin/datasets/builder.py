@@ -87,7 +87,7 @@ def build_dataloader(dataset,
         batch_sampler = None
 
 
-    if runner_type['type'] == 'IterBasedRunner' and shuffler_sampler['type'] =='InfiniteGroupEachSampleInBatchSampler':
+    if (runner_type['type'] == 'IterBasedRunner' or runner_type['type'] == 'CustomerIterBasedRunner' )and shuffler_sampler['type'] =='InfiniteGroupEachSampleInBatchSampler':
         # TODO: original has more options, but I'm not using them 
         # https://github.com/open-mmlab/mmdetection/blob/3b72b12fe9b14de906d1363982b9fba05e7d47c1/mmdet/datasets/builder.py#L145-L157
         batch_sampler = InfiniteGroupEachSampleInBatchSampler(

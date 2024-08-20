@@ -4,3 +4,4 @@ from .streampetr_head import StreamPETRHead
 from .sparse_head import SparseHead
 from .yolox_head import YOLOXHeadCustom
 from .raydn_head import RayDNHead
+from .harmo_distill_head import HarmoDistillHead

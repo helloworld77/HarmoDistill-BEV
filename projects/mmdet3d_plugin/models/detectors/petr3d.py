@@ -323,4 +323,165 @@ class Petr3D(MVXTwoStageDetector):
             result_dict['pts_bbox'] = pts_bbox
         return bbox_list
 
+    def obtain_history_memory_distill(self,
+                            gt_bboxes_3d=None,
+                            gt_labels_3d=None,
+                            gt_bboxes=None,
+                            gt_labels=None,
+                            img_metas=None,
+                            centers2d=None,
+                            depths=None,
+                            gt_bboxes_ignore=None,
+                            **data):
+        losses = dict()
+        T = data['img'].size(1)
+        num_nograd_frames = T - self.num_frame_head_grads
+        num_grad_losses = T - self.num_frame_losses
+        for i in range(T):
+            requires_grad = False
+            return_losses = False
+            data_t = dict()
+            for key in data:
+                data_t[key] = data[key][:, i] 
+
+            data_t['img_feats'] = data_t['img_feats']
+            if i >= num_nograd_frames:
+                requires_grad = True
+            if i >= num_grad_losses:
+                return_losses = True
+            loss, outs_roi, outs  = self.forward_pts_train_distill(gt_bboxes_3d[i],
+                                        gt_labels_3d[i], gt_bboxes[i],
+                                        gt_labels[i], img_metas[i], centers2d[i], depths[i], requires_grad=requires_grad,return_losses=return_losses,**data_t)
+            if loss is not None:
+                for key, value in loss.items():
+                    losses['frame_'+str(i)+"_"+key] = value
+        return loss, outs_roi, outs
+
+
+    def forward_pts_train_distill(self,
+                          gt_bboxes_3d,
+                          gt_labels_3d,
+                          gt_bboxes,
+                          gt_labels,
+                          img_metas,
+                          centers2d,
+                          depths,
+                          requires_grad=True,
+                          return_losses=False,
+                          **data):
+        """Forward function for point cloud branch.
+        Args:
+            pts_feats (list[torch.Tensor]): Features of point cloud branch
+            gt_bboxes_3d (list[:obj:`BaseInstance3DBoxes`]): Ground truth
+                boxes for each sample.
+            gt_labels_3d (list[torch.Tensor]): Ground truth labels for
+                boxes of each sampole
+            img_metas (list[dict]): Meta information of samples.
+            gt_bboxes_ignore (list[torch.Tensor], optional): Ground truth
+                boxes to be ignored. Defaults to None.
+        Returns:
+            dict: Losses of each branch.
+        """
+        location = self.prepare_location(img_metas, **data)
+
+        if not requires_grad:
+            self.eval()
+            with torch.no_grad():
+                outs = self.pts_bbox_head(location, img_metas, None, **data)
+            self.train()
+
+        else:
+            outs_roi = self.forward_roi_head(location, **data)
+            topk_indexes = outs_roi['topk_indexes']
+            outs = self.pts_bbox_head(location, img_metas, topk_indexes, **data)
+
+        if return_losses:
+            loss_inputs = [gt_bboxes_3d, gt_labels_3d, outs]
+            losses = self.pts_bbox_head.loss(*loss_inputs)
+            if self.with_img_roi_head:
+                loss2d_inputs = [gt_bboxes, gt_labels, centers2d, depths, outs_roi, img_metas]
+                losses2d = self.img_roi_head.loss(*loss2d_inputs)
+                losses.update(losses2d) 
+
+            return losses, outs_roi, outs
+        else:
+            return None
+
+    def simple_test_pts_distill(self, img_metas, **data):
+        """Test function of point cloud branch."""
+        location = self.prepare_location(img_metas, **data)
+        outs_roi = self.forward_roi_head(location, **data)
+        topk_indexes = outs_roi['topk_indexes']
+        if img_metas[0]['scene_token'] != self.prev_scene_token:
+            self.prev_scene_token = img_metas[0]['scene_token']
+            data['prev_exists'] = data['img'].new_zeros(1)
+            self.pts_bbox_head.reset_memory()
+        else:
+            data['prev_exists'] = data['img'].new_ones(1)
+        outs = self.pts_bbox_head(location, img_metas, topk_indexes, **data)
+        return outs
     
+    def simple_test_distill(self, img_metas, **data):
+        """Test function without augmentaiton."""
+        data['img_feats'] = self.extract_img_feat(data['img'], 1)
+        outs = self.simple_test_pts_distill(
+            img_metas, **data)
+        return outs
+    
+    def forward_distill(self,
+                      img_metas=None,
+                      gt_bboxes_3d=None,
+                      gt_labels_3d=None,
+                      gt_labels=None,
+                      gt_bboxes=None,
+                      gt_bboxes_ignore=None,
+                      depths=None,
+                      centers2d=None,
+                      **data):
+        """Forward training function.
+        Args:
+            points (list[torch.Tensor], optional): Points of each sample.
+                Defaults to None.
+            img_metas (list[dict], optional): Meta information of each sample.
+                Defaults to None.
+            gt_bboxes_3d (list[:obj:`BaseInstance3DBoxes`], optional):
+                Ground truth 3D boxes. Defaults to None.
+            gt_labels_3d (list[torch.Tensor], optional): Ground truth labels
+                of 3D boxes. Defaults to None.
+            gt_labels (list[torch.Tensor], optional): Ground truth labels
+                of 2D boxes in images. Defaults to None.
+            gt_bboxes (list[torch.Tensor], optional): Ground truth 2D boxes in
+                images. Defaults to None.
+            img (torch.Tensor optional): Images of each sample with shape
+                (N, C, H, W). Defaults to None.
+            proposals ([list[torch.Tensor], optional): Predicted proposals
+                used for training Fast RCNN. Defaults to None.
+            gt_bboxes_ignore (list[torch.Tensor], optional): Ground truth
+                2D boxes in images to be ignored. Defaults to None.
+        Returns:
+            dict: Losses of different branches.
+        """
+        if self.test_flag: #for interval evaluation
+            self.pts_bbox_head.reset_memory()
+            self.test_flag = False
+
+        T = data['img'].size(1)
+
+        prev_img = data['img'][:, :-self.num_frame_backbone_grads]
+        rec_img = data['img'][:, -self.num_frame_backbone_grads:]
+        rec_img_feats = self.extract_feat(rec_img, self.num_frame_backbone_grads)
+
+        if T-self.num_frame_backbone_grads > 0:
+            self.eval()
+            with torch.no_grad():
+                prev_img_feats = self.extract_feat(prev_img, T-self.num_frame_backbone_grads, True)
+            self.train()
+            data['img_feats'] = torch.cat([prev_img_feats, rec_img_feats], dim=1)
+        else:
+            data['img_feats'] = rec_img_feats
+
+        losses, outs_roi, outs  = self.obtain_history_memory_distill(gt_bboxes_3d,
+                        gt_labels_3d, gt_bboxes,
+                        gt_labels, img_metas, centers2d, depths, gt_bboxes_ignore, **data)
+
+        return losses, outs_roi, outs 

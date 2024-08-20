@@ -638,13 +638,16 @@ class StreamPETRHead(AnchorFreeHead):
                 'all_cls_scores': outputs_class,
                 'all_bbox_preds': outputs_coord,
                 'dn_mask_dict':mask_dict,
-
+                'feat_flatten': None,
+                'feat_shape': [x.shape[:-2]],
             }
         else:
             outs = {
                 'all_cls_scores': all_cls_scores,
                 'all_bbox_preds': all_bbox_preds,
                 'dn_mask_dict':None,
+                'feat_flatten': None,
+                'feat_shape': [x.shape[:-2]],
             }
 
         return outs

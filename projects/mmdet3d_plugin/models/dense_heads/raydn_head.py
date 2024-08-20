@@ -258,11 +258,12 @@ class RayDNHead(AnchorFreeHead):
             
         return tgt, query_pos, reference_points, temp_memory, temp_pos, rec_ego_pose
 
+    ## 这个函数非常关键，它的核心构建RD的 reference_points
     def prepare_for_dn(self, batch_size, reference_points, img_metas, data):
         if self.training and self.with_dn:
             targets = [torch.cat((img_meta['gt_bboxes_3d']._data.gravity_center, img_meta['gt_bboxes_3d']._data.tensor[:, 3:]),dim=1) for img_meta in img_metas ]
             labels = [img_meta['gt_labels_3d']._data for img_meta in img_metas ]
-            known = [(torch.ones_like(t)).cuda() for t in labels]
+            known = [(torch.ones_like(t)).to(reference_points.device) for t in labels]
             know_idx = known
             unmask_bbox = unmask_label = torch.cat(known)
             #gt_num
@@ -494,44 +495,46 @@ class RayDNHead(AnchorFreeHead):
                 Shape [nb_dec, bs, num_query, 9].
         """
         self.pre_update_memory(data)
-        mlvl_feats = data['img_feats']
-        B = mlvl_feats[0].size(0)
+        mlvl_feats = data['img_feats'] 
+        B = mlvl_feats[0].size(0) # [B, 6, 3, 256, 704] -> [B, 6, 256, 32, 88] [B, 6, 256, 16, 44] [B, 6, 256, 8, 22] [B, 6, 256, 4, 11] 
 
         reference_points = self.reference_points.weight
         dtype = reference_points.dtype
-        intrinsics = data['intrinsics'] / 1e3
-        extrinsics = data['extrinsics'][..., :3, :]
-        mln_input = torch.cat([intrinsics[..., 0,0:1], intrinsics[..., 1,1:2], extrinsics.flatten(-2)], dim=-1)
-        mln_input = mln_input.flatten(0, 1).unsqueeze(1)
+        intrinsics = data['intrinsics'] / 1e3 # [B, 6, 4x4]
+        extrinsics = data['extrinsics'][..., :3, :] #[B, 6, 3x4]
+        mln_input = torch.cat([intrinsics[..., 0,0:1], intrinsics[..., 1,1:2], extrinsics.flatten(-2)], dim=-1) # [B, 6, 14]
+        mln_input = mln_input.flatten(0, 1).unsqueeze(1) # [Bx6, 1, 14]
         feat_flatten = []
         spatial_flatten = []
         for i in range(len(mlvl_feats)):
             B, N, C, H, W = mlvl_feats[i].shape
-            mlvl_feat = mlvl_feats[i].reshape(B * N, C, -1).transpose(1, 2)
-            mlvl_feat = self.spatial_alignment(mlvl_feat, mln_input)
+            mlvl_feat = mlvl_feats[i].reshape(B * N, C, -1).transpose(1, 2) # [Bx6, 2816, 256] [Bx6, 704, 256] [Bx6, 176, 256] [Bx6, 44, 256]
+            ## 通过MLN对2D特征进行映射转换
+            mlvl_feat = self.spatial_alignment(mlvl_feat, mln_input) # [Bx6, 2816, 256] [Bx6, 704, 256] [Bx6, 176, 256] [Bx6, 44, 256]
             feat_flatten.append(mlvl_feat.to(dtype))
             spatial_flatten.append((H, W))
-        feat_flatten = torch.cat(feat_flatten, dim=1)
+        feat_flatten = torch.cat(feat_flatten, dim=1) # [Bx6, 3740, 256]
         spatial_flatten = torch.as_tensor(spatial_flatten, dtype=torch.long, device=mlvl_feats[0].device)
-        level_start_index = torch.cat((spatial_flatten.new_zeros((1, )), spatial_flatten.prod(1).cumsum(0)[:-1]))
+        level_start_index = torch.cat((spatial_flatten.new_zeros((1, )), spatial_flatten.prod(1).cumsum(0)[:-1])) # [0, 2816, 3520, 3696]
+        # import pdb; pdb.set_trace()
         reference_points, attn_mask, mask_dict = self.prepare_for_dn(B, reference_points, img_metas, data)
         query_pos = self.query_embedding(pos2posemb3d(reference_points))
-        tgt = torch.zeros_like(query_pos)
+        tgt = torch.zeros_like(query_pos)  # [4, 1020, 256]
 
         # prepare for the tgt and query_pos using mln.
-        tgt, query_pos, reference_points, temp_memory, temp_pos, rec_ego_pose = self.temporal_alignment(query_pos, tgt, reference_points)
+        tgt, query_pos, reference_points, temp_memory, temp_pos, rec_ego_pose = self.temporal_alignment(query_pos, tgt, reference_points)  # [4, 1148, 256] [4, 1148, 256] [4, 1148, 3] [4, 384, 256] [4, 384, 256] [4, 1276, 4, 4]
 
         outs_dec = self.transformer(tgt, query_pos, feat_flatten, spatial_flatten, level_start_index, temp_memory, 
                                     temp_pos, attn_mask, reference_points, self.pc_range, data, img_metas)
 
-        outs_dec = torch.nan_to_num(outs_dec)
+        outs_dec = torch.nan_to_num(outs_dec)  # [6, 4, 1148, 256]
         outputs_classes = []
         outputs_coords = []
         for lvl in range(outs_dec.shape[0]):
-            reference = inverse_sigmoid(reference_points.clone())
+            reference = inverse_sigmoid(reference_points.clone()) # [4, 1148, 3]
             assert reference.shape[-1] == 3
-            outputs_class = self.cls_branches[lvl](outs_dec[lvl])
-            tmp = self.reg_branches[lvl](outs_dec[lvl])
+            outputs_class = self.cls_branches[lvl](outs_dec[lvl]) # [4, 1148, 10]
+            tmp = self.reg_branches[lvl](outs_dec[lvl])           # [4, 1148, 10]
 
             tmp[..., 0:3] += reference[..., 0:3]
             tmp[..., 0:3] = tmp[..., 0:3].sigmoid()
@@ -540,23 +543,25 @@ class RayDNHead(AnchorFreeHead):
             outputs_classes.append(outputs_class)
             outputs_coords.append(outputs_coord)
 
-        all_cls_scores = torch.stack(outputs_classes)
-        all_bbox_preds = torch.stack(outputs_coords)
+        all_cls_scores = torch.stack(outputs_classes)   # 6x [4, 1148, 10]
+        all_bbox_preds = torch.stack(outputs_coords)    # 6x [4, 1148, 10]
         all_bbox_preds[..., 0:3] = (all_bbox_preds[..., 0:3] * (self.pc_range[3:6] - self.pc_range[0:3]) + self.pc_range[0:3])
         
         # update the memory bank
         self.post_update_memory(data, rec_ego_pose, all_cls_scores, all_bbox_preds, outs_dec, mask_dict)
 
-        if mask_dict and mask_dict['pad_size'] > 0:
-            output_known_class = all_cls_scores[:, :, :mask_dict['pad_size'], :]
-            output_known_coord = all_bbox_preds[:, :, :mask_dict['pad_size'], :]
-            outputs_class = all_cls_scores[:, :, mask_dict['pad_size']:, :]
-            outputs_coord = all_bbox_preds[:, :, mask_dict['pad_size']:, :]
+        if mask_dict and mask_dict['pad_size'] > 0:  # mask_dict['pad_size']=720
+            output_known_class = all_cls_scores[:, :, :mask_dict['pad_size'], :]    # [6, 4, 720, 10]
+            output_known_coord = all_bbox_preds[:, :, :mask_dict['pad_size'], :]    # [6, 4, 720, 10]
+            outputs_class = all_cls_scores[:, :, mask_dict['pad_size']:, :]         # [6, 4, 428, 10]
+            outputs_coord = all_bbox_preds[:, :, mask_dict['pad_size']:, :]         # [6, 4, 428, 10]
             mask_dict['output_known_lbs_bboxes']=(output_known_class, output_known_coord)
             outs = {
                 'all_cls_scores': outputs_class,
                 'all_bbox_preds': outputs_coord,
                 'dn_mask_dict':mask_dict,
+                'feat_flatten': feat_flatten,
+                'feat_shape': spatial_flatten,
 
             }
         else:
@@ -564,6 +569,8 @@ class RayDNHead(AnchorFreeHead):
                 'all_cls_scores': all_cls_scores,
                 'all_bbox_preds': all_bbox_preds,
                 'dn_mask_dict':None,
+                'feat_flatten': feat_flatten,
+                'feat_shape': spatial_flatten,
             }
 
         return outs

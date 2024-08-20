@@ -26,7 +26,8 @@ from mmcv.cnn.bricks.registry import (ATTENTION,TRANSFORMER_LAYER,
 from mmcv.utils import deprecated_api_warning, ConfigDict
 import copy
 from torch.nn import ModuleList
-from .attention import FlashMHA
+if torch.cuda.is_available():
+    from .attention import FlashMHA
 import torch.utils.checkpoint as cp
 
 from mmcv.runner import auto_fp16

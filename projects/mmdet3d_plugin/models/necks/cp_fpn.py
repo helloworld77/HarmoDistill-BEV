@@ -182,6 +182,7 @@ class CPFPN(BaseModule):
         outs = [
             self.fpn_convs[i](laterals[i]) if i==0 else laterals[i] for i in range(used_backbone_levels)
         ]
+
         # part 2: add extra levels
         if self.num_outs > len(outs):
             # use max pool to get more levels on top of outputs

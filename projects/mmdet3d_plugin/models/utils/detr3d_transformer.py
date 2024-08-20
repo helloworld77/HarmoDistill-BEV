@@ -8,7 +8,7 @@ from mmcv.cnn.bricks.transformer import (BaseTransformerLayer,
                                          build_transformer_layer_sequence,
                                          build_attention,
                                          build_feedforward_network)
-from mmcv.ops.multi_scale_deform_attn import MultiScaleDeformableAttnFunction
+from mmcv.ops.multi_scale_deform_attn import MultiScaleDeformableAttnFunction, multi_scale_deformable_attn_pytorch
 from mmcv.runner.base_module import BaseModule
 from mmcv.cnn.bricks.registry import (ATTENTION,TRANSFORMER_LAYER,
                                       TRANSFORMER_LAYER_SEQUENCE)
@@ -35,7 +35,7 @@ class Detr3DTransformer(BaseModule):
         as_two_stage (bool): Generate query from encoder features.
             Default: False.
         num_feature_levels (int): Number of feature maps from FPN:
-            Default: 4.
+            Default: 4.q
         two_stage_num_proposals (int): Number of proposals when set
             `as_two_stage` as True. Default: 300.
     """
@@ -516,6 +516,14 @@ class DeformableFeatureAggregationCuda(BaseModule):
         nn.init.uniform_(self.learnable_fc.bias.data, -self.bias, self.bias)    
 
     def forward(self, instance_feature, query_pos,feat_flatten, reference_points, spatial_flatten, level_start_index, pc_range, lidar2img_mat, img_metas):
+        # instance_feature: [bs, num_anchor, embed_dims] eg. [4, 428, 256]
+        # query_pos: [bs, num_anchor, embed_dims] eg. [4, 428, 256]
+        # feat_flatten: [xx, xx, embed_dims] eg. [24, 3740, 256]
+        # reference_points: [bs, num_anchor, 3] eg. [4, 428, 3]
+        # spatial_flatten: [xx, 2] eg. [4, 2]
+        # level_start_index: [xx] eg. [4]
+        # pc_range: [xx] eg. [6]
+        # lidar2img_mat: eg. [4, 6, 4, 4]
         bs, num_anchor = reference_points.shape[:2]
         reference_points = get_global_pos(reference_points, pc_range)
         key_points = reference_points.unsqueeze(-2) + self.learnable_fc(instance_feature).reshape(bs, num_anchor, -1, 3)
@@ -534,6 +542,7 @@ class DeformableFeatureAggregationCuda(BaseModule):
         cam_embed = self.cam_embed(lidar2img) # B, N, C
         feat_pos = (instance_feature + anchor_embed).unsqueeze(2) + cam_embed.unsqueeze(1)
         weights = self.weights_fc(feat_pos).reshape(bs, num_anchor, -1, self.num_groups).softmax(dim=-2)
+        # weights = F.normalize(self.weights_fc(feat_pos).reshape(bs, num_anchor, -1, self.num_groups), dim=-2)
         weights = weights.reshape(bs, num_anchor, self.num_cams, -1, self.num_groups).permute(0, 2, 1, 4, 3).contiguous()
         return weights.flatten(end_dim=1)
 
@@ -553,10 +562,13 @@ class DeformableFeatureAggregationCuda(BaseModule):
         bn, num_value, _ = feat_flatten.size()
         feat_flatten = feat_flatten.reshape(bn, num_value, self.num_groups, -1)
         # attention_weights = weights * mask
-        output = MultiScaleDeformableAttnFunction.apply(
-                feat_flatten, spatial_flatten, level_start_index, points_2d,
-                weights, self.im2col_step)
+        if torch.cuda.is_available() and feat_flatten.is_cuda:
+            output = MultiScaleDeformableAttnFunction.apply(feat_flatten, spatial_flatten, level_start_index, points_2d, weights, self.im2col_step)
+        else:
+            output = multi_scale_deformable_attn_pytorch(feat_flatten, spatial_flatten, points_2d, weights)
         
+        # output: [24, 428, 256]
         output = output.reshape(bs, self.num_cams, num_anchor, -1)
+        # output: [4, 6, 428, 256]
 
         return output.sum(1)

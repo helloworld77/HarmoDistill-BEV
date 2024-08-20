@@ -7,7 +7,7 @@ import torch.nn.functional as F
 from mmcv.cnn import (ConvModule, DepthwiseSeparableConvModule,
                       bias_init_with_prob)
 from mmcv.ops.nms import batched_nms
-from mmcv.runner import force_fp32
+from mmcv.runner import force_fp32, auto_fp16
 
 from mmdet.core import (MlvlPointGenerator, bbox_xyxy_to_cxcywh,
                         build_assigner, build_sampler, multi_apply,
@@ -186,6 +186,7 @@ class YOLOXHeadCustom(BaseDenseHead, BBoxTestMixin):
             conv_cls.bias.data.fill_(bias_init)
             conv_obj.bias.data.fill_(bias_init)
 
+    @auto_fp16(apply_to=("x"), out_fp32=True)
     def forward_single(self, x, cls_convs, reg_convs, conv_cls, conv_reg,
                        conv_obj, conv_centers2d):
         """Forward feature of a single scale level."""
