@@ -437,7 +437,7 @@ class HarmoDistiller(BaseDetector):
                 teacher_attnmap = get_attnmap(teacher_key_points[:, -428:, :, :], teacher_querys[i][:, -428:, :], pc_range)
                 # student_attnmap = get_attnmap_sum(student_key_points[:, -428:, :, :], student_querys[i][:, -428:, :], pc_range)
                 student_attnmap = get_attnmap(student_key_points[:, -428:, :, :], student_querys[i][:, -428:, :], pc_range)
-                student_loss[loss_name] = (1 - self.iter) * self.distill_losses[loss_name](student_attnmap, teacher_attnmap, kwargs['gt_bboxes'], kwargs['img_metas'])
+                student_loss[loss_name] = self.iter * self.distill_losses[loss_name](student_attnmap, teacher_attnmap, kwargs['gt_bboxes'], kwargs['img_metas'])
 
         return student_loss
     
