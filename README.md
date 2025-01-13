@@ -1,6 +1,5 @@
 <div align="center">
-<h1>HarmoDistill</h1>
-<h1> Harmonizing Attention Fields with Knowledge Distillation for Multi-View 3D Object Detection </h1>
+<h1>HarmoDistill: Harmonizing Attention Fields with Knowledge Distillation for Multi-View 3D Object Detection </h1>
 
 </div>
 
