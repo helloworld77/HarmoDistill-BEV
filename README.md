@@ -1,6 +1,6 @@
 <div align="center">
-<h1>HarmoDistill-BEV</h1>
-<h1> Bridge the Gap for 3D Query Receptive Field in Multi-Camera BEV Distillation </h1>
+<h1>HarmoDistill</h1>
+<h1> Harmonizing Attention Fields with Knowledge Distillation for Multi-View 3D Object Detection </h1>
 
 </div>
 
@@ -10,7 +10,7 @@
 
 ## Introduction
 
-This repository is an official implementation of [HarmoDistill-BEV: Bridge the Gap for 3D Query Receptive Field in Multi-Camera BEV Distillation](https://openreview.net/attachment?id=2UmcbThFdO&name=pdf). This repository contains Pytorch training code, evaluation code and pre-trained models.
+This repository is an official implementation of [Harmonizing Attention Fields with Knowledge Distillation for Multi-View 3D Object Detection](-). This repository contains Pytorch training code, evaluation code and pre-trained models.
 
 ## Getting Started
 
@@ -44,7 +44,7 @@ tools/dist_test.sh projects/configs/RayDN/raydn_r18_704_bs2_seq_428q_nui_60e.py 
 |   HarmoDistill-RayDN   | R50 - 428q | [NuImg](https://download.openmmlab.com/mmdetection3d/v0.1.0_models/nuimages_semseg/cascade_mask_rcnn_r50_fpn_coco-20e_20e_nuim/cascade_mask_rcnn_r50_fpn_coco-20e_20e_nuim_20201009_124951-40963960.pth) |  24ep  | 55.62 | 45.78 |        [config](projects/configs/RayDN/raydn_r50_flash_704_bs2_seq_428q_nui_60e.py)        | [ckpt](https://pan.baidu.com/s/1CMm8FdzMkWE24QboK908nQ) | 110.27
 | HarmoDistill-StreamPETR | R50 - 428q | [NuImg](https://download.openmmlab.com/mmdetection3d/v0.1.0_models/nuimages_semseg/cascade_mask_rcnn_r50_fpn_coco-20e_20e_nuim/cascade_mask_rcnn_r50_fpn_coco-20e_20e_nuim_20201009_124951-40963960.pth) |  24ep  | 53.06 | 43.91 | [config](projects/configs/StreamPETR/stream_petr_r50_flash_704_bs4_seq_428q_nui_24e.py.py) | [ckpt](https://pan.baidu.com/s/1mnhkKasLfe-ckfC_hTrGug) | 105.03
 
-This repository is an official implementation of HarmoDistill-BEV.
+This repository is an official implementation of HarmoDistill.
 
 ## Getting Started
 
